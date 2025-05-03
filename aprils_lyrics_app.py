@@ -13,7 +13,7 @@ import time
 st.set_page_config(layout="wide")
 
 # Session Initialization
-for key, default in {
+defaults = {
     "songs": {},
     "playlist": [],
     "playlists": {},
@@ -26,13 +26,16 @@ for key, default in {
     "redo_stack": [],
     "bpm": 100,
     "transposition": 0,
-    "parsed_from_pdf": False
-}.items():
+    "parsed_from_pdf": False,
+    "chord_fields": {},
+    "lyrics_field": ""
+}
+for key, value in defaults.items():
     if key not in st.session_state:
-        st.session_state[key] = default
+        st.session_state[key] = value
 
-# Sidebar Controls
-st.sidebar.title("🎵 Playlist Manager & Tools")
+# Sidebar Controls (Playlist + Performance Tools)
+st.sidebar.title("🎵 Playlist & Performance")
 playlist_name = st.sidebar.text_input("New Playlist Name")
 if st.sidebar.button("➕ Create Playlist") and playlist_name:
     st.session_state.playlists[playlist_name] = []
@@ -42,8 +45,7 @@ if selected_playlist != "None":
     if st.sidebar.button("📥 Update Playlist"):
         st.session_state.playlists[selected_playlist] = songs_to_add
 
-# Tap Tempo & Playback
-st.sidebar.subheader("⏱️ Tempo & Scroll")
+st.sidebar.subheader("⏱️ Tap Tempo + Scroll")
 if st.sidebar.button("🖱️ Tap Tempo"):
     st.session_state.tap_times.append(time.time())
     if len(st.session_state.tap_times) >= 2:
@@ -53,15 +55,11 @@ if st.sidebar.button("🖱️ Tap Tempo"):
 if st.sidebar.button("🔄 Reset Tap"):
     st.session_state.tap_times = []
 st.session_state["bpm"] = st.sidebar.number_input("BPM", 40, 240, st.session_state["bpm"])
-scroll = st.sidebar.checkbox("Auto-scroll with BPM")
-if scroll:
+if st.sidebar.checkbox("Auto-scroll with BPM"):
     st.markdown(f"<meta http-equiv='refresh' content='{60/st.session_state['bpm']}'>", unsafe_allow_html=True)
 
-# Transposition
-st.sidebar.subheader("🎼 Transpose Chords")
-st.session_state["transposition"] = st.sidebar.slider("Key Change (semitones)", -6, 6, 0)
-
-# Rehearsal Countdown
+st.sidebar.subheader("🎼 Key & View Settings")
+st.session_state["transposition"] = st.sidebar.slider("Transpose", -6, 6, 0)
 if st.sidebar.checkbox("Enable Rehearsal Countdown"):
     count = st.sidebar.number_input("Countdown Seconds", 1, 10, 3)
     if st.sidebar.button("▶ Start Rehearsal"):
@@ -70,12 +68,11 @@ if st.sidebar.checkbox("Enable Rehearsal Countdown"):
             time.sleep(1)
         st.success("🎶 Go!")
 
-# Fullscreen + Dark Theme
-fullscreen = st.sidebar.checkbox("🎭 Fullscreen Mode")
-dark = st.sidebar.checkbox("🌙 Dark Theme")
+fullscreen = st.sidebar.checkbox("Fullscreen Mode")
+dark = st.sidebar.checkbox("Dark Theme")
 font_scale = st.sidebar.slider("Font Scale %", 50, 200, 100)
 
-# PDF Upload & Parsing
+# PDF Upload
 st.title("Lyrics & Chords Manager")
 uploaded = st.file_uploader("Upload PDF", type="pdf")
 if uploaded:
@@ -92,33 +89,30 @@ if uploaded:
             chords.setdefault(current, []).append(line)
         elif line.strip():
             lyrics.append(line)
+
     st.session_state["classified_chords"] = chords
     st.session_state["classified_lyrics"] = lyrics
     st.session_state["parsed_from_pdf"] = True
+    st.session_state["lyrics_field"] = "\n".join(lyrics)
+    st.session_state["chord_fields"] = {sec: "\n".join(lines) for sec, lines in chords.items()}
 
-# Editable Section UI with auto-loaded text areas
+# Chord Editors
 if "classified_chords" in st.session_state:
     st.subheader("🪕 Chord Sections")
-    for sec, lines in st.session_state["classified_chords"].items():
-        raw = "\n".join(lines)
-        edited = st.text_area(f"{sec} Chords", value=raw, height=100, key=f"{sec}_chords")
+    for sec in st.session_state["classified_chords"]:
+        default = st.session_state["chord_fields"].get(sec, "")
+        edited = st.text_area(f"{sec} Chords", value=default, height=100, key=f"{sec}_text")
         st.session_state["classified_chords"][sec] = edited.splitlines()
+        st.session_state["chord_fields"][sec] = edited
         note = st.text_input(f"Note for {sec}", value=st.session_state["section_notes"].get(sec, ""), key=f"{sec}_note")
         st.session_state["section_notes"][sec] = note
 
+# Lyrics Editor
 if "classified_lyrics" in st.session_state:
     st.subheader("🎤 Lyrics")
-    raw = "\n".join(st.session_state["classified_lyrics"])
-    edited = st.text_area("Lyrics", value=raw, height=200, key="lyrics_block")
+    edited = st.text_area("Lyrics", value=st.session_state["lyrics_field"], height=200, key="lyrics_box")
     st.session_state["classified_lyrics"] = edited.splitlines()
-
-# Undo/Redo
-if st.button("Undo") and st.session_state["undo_stack"]:
-    st.session_state["redo_stack"].append(st.session_state["classified_chords"])
-    st.session_state["classified_chords"] = st.session_state["undo_stack"].pop()
-if st.button("Redo") and st.session_state["redo_stack"]:
-    st.session_state["undo_stack"].append(st.session_state["classified_chords"])
-    st.session_state["classified_chords"] = st.session_state["redo_stack"].pop()
+    st.session_state["lyrics_field"] = edited
 
 # Save Song
 if st.button("📦 Save Song from Sections"):
@@ -135,7 +129,7 @@ if st.button("📦 Save Song from Sections"):
     st.session_state["playlist"].append(song_key)
     st.session_state["selected_song"] = song_key
 
-# Export Tools
+# Export
 if st.session_state.get("selected_song"):
     txt = st.session_state["songs"][st.session_state["selected_song"]]
     st.download_button("📄 Download TXT", txt, file_name="song.txt")
@@ -150,10 +144,10 @@ if st.session_state.get("selected_song"):
         st.download_button("🖨️ Download PDF", f.read(), file_name="song.pdf")
 
 # Web Search Stub
-st.sidebar.subheader("🔍 Import From Web (Stub)")
-st.sidebar.text_input("Search for song on Ultimate Guitar")
+st.sidebar.subheader("🔍 Web Import (Stub)")
+st.sidebar.text_input("Search site for chords")
 
-# Fullscreen Theme Styling
+# Theme Styling
 if fullscreen or dark:
     st.markdown(
         f"<style>body {{ background: black; color: white; font-size: {font_scale}%; }}</style>",
