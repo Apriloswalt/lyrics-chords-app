@@ -18,7 +18,6 @@ SESSION_FILE = "session_data.json"
 UNDO_STACK = "undo_stack.json"
 REDO_STACK = "redo_stack.json"
 
-
 def generate_metronome(bpm: int, duration: int, output_path: str):
     frequency = 1000
     click_len = 0.05
@@ -32,14 +31,12 @@ def generate_metronome(bpm: int, duration: int, output_path: str):
 
     sf.write(output_path, metronome, sample_rate)
 
-
 def play_metronome(bpm: int, duration: int):
     output_path = "/tmp/metronome.wav"
     generate_metronome(bpm, duration, output_path)
     with open(output_path, "rb") as f:
         audio_data = f.read()
     st.audio(audio_data, format="audio/wav")
-
 
 # Example Streamlit usage
 st.title("Metronome Example")
