@@ -25,7 +25,8 @@ for key, default in {
     "undo_stack": [],
     "redo_stack": [],
     "bpm": 100,
-    "transposition": 0
+    "transposition": 0,
+    "parsed_from_pdf": False
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -93,24 +94,22 @@ if uploaded:
             lyrics.append(line)
     st.session_state["classified_chords"] = chords
     st.session_state["classified_lyrics"] = lyrics
+    st.session_state["parsed_from_pdf"] = True
 
-# Editable Section UI
+# Editable Section UI with auto-loaded text areas
 if "classified_chords" in st.session_state:
     st.subheader("🪕 Chord Sections")
     for sec, lines in st.session_state["classified_chords"].items():
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            raw = "\n".join(lines)
-            edited = st.text_area(f"{sec} Chords", value=raw, height=100)
-            st.session_state["classified_chords"][sec] = edited.splitlines()
-        with col2:
-            note = st.text_input(f"Note for {sec}", value=st.session_state["section_notes"].get(sec, ""))
-            st.session_state["section_notes"][sec] = note
+        raw = "\n".join(lines)
+        edited = st.text_area(f"{sec} Chords", value=raw, height=100, key=f"{sec}_chords")
+        st.session_state["classified_chords"][sec] = edited.splitlines()
+        note = st.text_input(f"Note for {sec}", value=st.session_state["section_notes"].get(sec, ""), key=f"{sec}_note")
+        st.session_state["section_notes"][sec] = note
 
 if "classified_lyrics" in st.session_state:
     st.subheader("🎤 Lyrics")
     raw = "\n".join(st.session_state["classified_lyrics"])
-    edited = st.text_area("Lyrics", value=raw, height=200)
+    edited = st.text_area("Lyrics", value=raw, height=200, key="lyrics_block")
     st.session_state["classified_lyrics"] = edited.splitlines()
 
 # Undo/Redo
