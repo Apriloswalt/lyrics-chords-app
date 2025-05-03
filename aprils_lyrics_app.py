@@ -1,46 +1,94 @@
 # lyrics_chords_app/main.py
 
-import matplotlib.pyplot as plt
-import numpy as np
-import librosa
-import librosa.display
-import soundfile as sf
-from matplotlib.widgets import Cursor
-import streamlit.components.v1 as components
-import streamlit as st
-import time
-from datetime import datetime
-import json
-import os
+... [previous code unchanged above] ...
 
-SETTINGS_FILE = "user_settings.json"
-SESSION_FILE = "session_data.json"
-UNDO_STACK = "undo_stack.json"
-REDO_STACK = "redo_stack.json"
+from fpdf import FPDF
 
-def generate_metronome(bpm: int, duration: int, output_path: str):
-    frequency = 1000
-    click_len = 0.05
-    sample_rate = 44100
-    interval = 60.0 / bpm
-    total_clicks = int(duration / interval)
+CHORDS = ["C", "D", "E", "F", "G", "A", "B"]
+CHORD_ALTER = ["#", "b", "m", "7", "maj", "min", "sus", "dim", "aug"]
 
-    click = (np.sin(2 * np.pi * frequency * np.linspace(0, click_len, int(sample_rate * click_len))) * 0.5).astype(np.float32)
-    silence = np.zeros(int(sample_rate * (interval - click_len)), dtype=np.float32)
-    metronome = np.concatenate([np.concatenate([click, silence]) for _ in range(total_clicks)])
+NOTE_ORDER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-    sf.write(output_path, metronome, sample_rate)
+def transpose_chord(chord, shift):
+    base = chord
+    for alt in CHORD_ALTER:
+        if alt in chord:
+            base = chord.split(alt)[0]
+            suffix = chord[len(base):]
+            break
+    else:
+        suffix = ""
+    if base not in NOTE_ORDER:
+        return chord
+    idx = (NOTE_ORDER.index(base) + shift) % 12
+    return NOTE_ORDER[idx] + suffix
 
-def play_metronome(bpm: int, duration: int):
-    output_path = "/tmp/metronome.wav"
-    generate_metronome(bpm, duration, output_path)
-    with open(output_path, "rb") as f:
-        audio_data = f.read()
-    st.audio(audio_data, format="audio/wav")
+transpose_shift = st.sidebar.slider("Transpose Key", -6, 6, 0)
+show_original = st.sidebar.checkbox("Show Original Chords", value=False)
 
-# Example Streamlit usage
-st.title("Metronome Example")
-bpm = st.number_input("BPM", min_value=30, max_value=300, value=120)
-duration = st.number_input("Duration (s)", min_value=1, max_value=60, value=10)
-if st.button("Play Metronome"):
-    play_metronome(bpm, duration)
+# --- On-Screen Transposed Preview with Inline Chords ---
+if st.session_state.get("selected_song"):
+    st.subheader("Song Preview")
+    song_key = st.session_state["selected_song"]
+    order = st.session_state["section_order"].get(f"order_{song_key}", [])
+    renames = st.session_state["section_rename"].get(f"rename_{song_key}", {})
+    notes = st.session_state["section_notes"].get(f"notes_{song_key}", {})
+    raw_text = st.session_state["songs"][song_key].splitlines()
+
+    sections = {}
+    current = "Intro"
+    for line in raw_text:
+        if any(header in line for header in ["Verse", "Chorus", "Bridge"]):
+            current = line.strip()
+            sections[current] = []
+        else:
+            sections.setdefault(current, []).append(line)
+
+    for sec in order:
+        st.markdown(f"### {renames.get(sec, sec)}")
+        if notes.get(sec):
+            st.markdown(f"*{notes[sec]}*")
+        for line in sections.get(sec, []):
+            style = "font-family:monospace;font-size:18px"
+            if "[" in line and "]" in line:
+                parts = line.split("[")
+                new_line = parts[0]
+                for chunk in parts[1:]:
+                    chord, *rest = chunk.split("]", 1)
+                    rest_text = rest[0] if rest else ""
+                    chord_display = chord if show_original else transpose_chord(chord, transpose_shift)
+                    new_line += f"<b style='color:red'>[{chord_display}]</b>{rest_text}"
+                st.markdown(f"<div style='{style};background:#f5f5f5;padding:2px'>{new_line}</div>", unsafe_allow_html=True)
+            else:
+                words = line.split()
+                if any(w[0] in CHORDS for w in words):
+                    line_type = "chord"
+                else:
+                    line_type = "lyric"
+                transposed = [w if show_original else transpose_chord(w, transpose_shift) for w in words]
+                color = "#f5f5f5" if line_type == "lyric" else "#eef"
+                st.markdown(f"<div style='{style};background:{color};padding:2px'>{' '.join(transposed)}</div>", unsafe_allow_html=True)
+
+# --- Print Layout Preview ---
+    st.subheader("Print Layout Preview")
+    for sec in order:
+        st.markdown(f"### {renames.get(sec, sec)}")
+        if notes.get(sec):
+            st.markdown(f"*{notes[sec]}*")
+        for line in sections.get(sec, []):
+            if "[" in line and "]" in line:
+                parts = line.split("[")
+                rendered = parts[0]
+                for chunk in parts[1:]:
+                    chord, *rest = chunk.split("]", 1)
+                    rest_text = rest[0] if rest else ""
+                    chord_display = chord if show_original else transpose_chord(chord, transpose_shift)
+                    rendered += f"[{chord_display}]{rest_text}"
+                st.code(rendered)
+            else:
+                words = line.split()
+                transposed = [w if show_original else transpose_chord(w, transpose_shift) for w in words]
+                st.code(" ".join(transposed))
+
+# --- PDF EXPORT with font + transposition ---
+...
