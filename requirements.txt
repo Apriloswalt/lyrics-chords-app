@@ -3,3 +3,5 @@ matplotlib
 numpy
 librosa
 soundfile
+PyMuPDF
+fpdf
