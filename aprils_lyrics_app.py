@@ -114,25 +114,23 @@ if "classified_lyrics" in st.session_state:
     st.session_state["classified_lyrics"] = edited.splitlines()
 
 # Undo/Redo
-if st.button("Undo"):
-    if st.session_state["undo_stack"]:
-        st.session_state["redo_stack"].append(st.session_state["classified_chords"])
-        st.session_state["classified_chords"] = st.session_state["undo_stack"].pop()
-if st.button("Redo"):
-    if st.session_state["redo_stack"]:
-        st.session_state["undo_stack"].append(st.session_state["classified_chords"])
-        st.session_state["classified_chords"] = st.session_state["redo_stack"].pop()
+if st.button("Undo") and st.session_state["undo_stack"]:
+    st.session_state["redo_stack"].append(st.session_state["classified_chords"])
+    st.session_state["classified_chords"] = st.session_state["undo_stack"].pop()
+if st.button("Redo") and st.session_state["redo_stack"]:
+    st.session_state["undo_stack"].append(st.session_state["classified_chords"])
+    st.session_state["classified_chords"] = st.session_state["redo_stack"].pop()
 
 # Save Song
 if st.button("📦 Save Song from Sections"):
     final = []
-    for sec, lines in st.session_state["classified_chords"].items():
+    for sec, lines in st.session_state.get("classified_chords", {}).items():
         final.append(f"## {sec}")
         final.extend(lines)
         if st.session_state["section_notes"].get(sec):
             final.append(f"[Note] {st.session_state['section_notes'][sec]}")
     final.append("## Lyrics")
-    final.extend(st.session_state["classified_lyrics"])
+    final.extend(st.session_state.get("classified_lyrics", []))
     song_key = f"song_{datetime.now().strftime('%H%M%S')}"
     st.session_state["songs"][song_key] = "\n".join(final)
     st.session_state["playlist"].append(song_key)
