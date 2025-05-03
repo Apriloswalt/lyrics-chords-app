@@ -12,27 +12,26 @@ import time
 
 st.set_page_config(layout="wide")
 
-SETTINGS_FILE = "user_settings.json"
-SESSION_FILE = "session_data.json"
+# Session Initialization
+for key, default in {
+    "songs": {},
+    "playlist": [],
+    "playlists": {},
+    "selected_song": None,
+    "section_order": {},
+    "section_rename": {},
+    "section_notes": {},
+    "tap_times": [],
+    "undo_stack": [],
+    "redo_stack": [],
+    "bpm": 100,
+    "transposition": 0
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-# --- Initialization ---
-if "songs" not in st.session_state:
-    st.session_state.songs = {}
-if "playlist" not in st.session_state:
-    st.session_state.playlist = []
-if "playlists" not in st.session_state:
-    st.session_state.playlists = {}
-if "selected_song" not in st.session_state:
-    st.session_state.selected_song = None
-if "section_order" not in st.session_state:
-    st.session_state.section_order = {}
-if "section_rename" not in st.session_state:
-    st.session_state.section_rename = {}
-if "section_notes" not in st.session_state:
-    st.session_state.section_notes = {}
-
-# --- Sidebar: Playlist Manager ---
-st.sidebar.title("🎵 Playlist Manager")
+# Sidebar Controls
+st.sidebar.title("🎵 Playlist Manager & Tools")
 playlist_name = st.sidebar.text_input("New Playlist Name")
 if st.sidebar.button("➕ Create Playlist") and playlist_name:
     st.session_state.playlists[playlist_name] = []
@@ -42,60 +41,8 @@ if selected_playlist != "None":
     if st.sidebar.button("📥 Update Playlist"):
         st.session_state.playlists[selected_playlist] = songs_to_add
 
-# --- PDF Upload + Classification ---
-st.title("Lyrics & Chords Manager")
-uploaded = st.file_uploader("Upload PDF with Lyrics/Chords", type="pdf")
-if uploaded:
-    text = ""
-    with fitz.open(stream=uploaded.read(), filetype="pdf") as doc:
-        for page in doc:
-            text += page.get_text()
-    lines = text.splitlines()
-    current = "Intro"
-    chords = {}
-    lyrics = []
-    for line in lines:
-        if any(k in line.lower() for k in ["verse", "chorus", "intro", "bridge", "outro", "interlude"]):
-            current = line.strip().title()
-            continue
-        if all(token.strip().isalpha() and len(token.strip()) <= 4 for token in line.split()):
-            chords.setdefault(current, []).append(line)
-        else:
-            lyrics.append(line)
-
-    st.session_state["classified_chords"] = chords
-    st.session_state["classified_lyrics"] = lyrics
-
-# --- Editable Chord & Lyrics Sections ---
-if "classified_chords" in st.session_state:
-    st.subheader("🎼 Edit Chord Sections")
-    for sec, lines in st.session_state["classified_chords"].items():
-        raw = "\n".join(lines)
-        edited = st.text_area(f"{sec} Chords", value=raw, height=100)
-        st.session_state["classified_chords"][sec] = edited.splitlines()
-
-if "classified_lyrics" in st.session_state:
-    st.subheader("📝 Edit Lyrics")
-    raw = "\n".join(st.session_state["classified_lyrics"])
-    edited = st.text_area("Lyrics", value=raw, height=200)
-    st.session_state["classified_lyrics"] = edited.splitlines()
-
-if st.button("📦 Build Song from Sections"):
-    final = []
-    for sec, lines in st.session_state["classified_chords"].items():
-        final.append(f"## {sec}")
-        final.extend(lines)
-    final.append("## Lyrics")
-    final.extend(st.session_state["classified_lyrics"])
-    song_key = f"song_{datetime.now().strftime('%H%M%S')}"
-    st.session_state["songs"][song_key] = "\n".join(final)
-    st.session_state["playlist"].append(song_key)
-    st.session_state["selected_song"] = song_key
-
-# --- Playback Tools ---
-st.sidebar.subheader("Tempo & Scroll")
-if "tap_times" not in st.session_state:
-    st.session_state.tap_times = []
+# Tap Tempo & Playback
+st.sidebar.subheader("⏱️ Tempo & Scroll")
 if st.sidebar.button("🖱️ Tap Tempo"):
     st.session_state.tap_times.append(time.time())
     if len(st.session_state.tap_times) >= 2:
@@ -104,13 +51,94 @@ if st.sidebar.button("🖱️ Tap Tempo"):
         st.session_state["bpm"] = int(bpm)
 if st.sidebar.button("🔄 Reset Tap"):
     st.session_state.tap_times = []
-
-bpm = st.sidebar.number_input("BPM", min_value=40, max_value=240, value=st.session_state.get("bpm", 100))
+st.session_state["bpm"] = st.sidebar.number_input("BPM", 40, 240, st.session_state["bpm"])
 scroll = st.sidebar.checkbox("Auto-scroll with BPM")
 if scroll:
-    st.markdown(f"<meta http-equiv='refresh' content='{60/bpm}'>", unsafe_allow_html=True)
+    st.markdown(f"<meta http-equiv='refresh' content='{60/st.session_state['bpm']}'>", unsafe_allow_html=True)
 
-# --- Export ---
+# Transposition
+st.sidebar.subheader("🎼 Transpose Chords")
+st.session_state["transposition"] = st.sidebar.slider("Key Change (semitones)", -6, 6, 0)
+
+# Rehearsal Countdown
+if st.sidebar.checkbox("Enable Rehearsal Countdown"):
+    count = st.sidebar.number_input("Countdown Seconds", 1, 10, 3)
+    if st.sidebar.button("▶ Start Rehearsal"):
+        for i in reversed(range(count)):
+            st.warning(f"Starting in {i+1}...")
+            time.sleep(1)
+        st.success("🎶 Go!")
+
+# Fullscreen + Dark Theme
+fullscreen = st.sidebar.checkbox("🎭 Fullscreen Mode")
+dark = st.sidebar.checkbox("🌙 Dark Theme")
+font_scale = st.sidebar.slider("Font Scale %", 50, 200, 100)
+
+# PDF Upload & Parsing
+st.title("Lyrics & Chords Manager")
+uploaded = st.file_uploader("Upload PDF", type="pdf")
+if uploaded:
+    with fitz.open(stream=uploaded.read(), filetype="pdf") as doc:
+        text = "".join([page.get_text() for page in doc])
+    lines = text.splitlines()
+    current = "Intro"
+    chords, lyrics = {}, []
+    for line in lines:
+        if any(k in line.lower() for k in ["verse", "chorus", "bridge", "intro", "outro", "interlude"]):
+            current = line.strip().title()
+            continue
+        if all(token.strip().isalpha() and len(token.strip()) <= 4 for token in line.split()):
+            chords.setdefault(current, []).append(line)
+        elif line.strip():
+            lyrics.append(line)
+    st.session_state["classified_chords"] = chords
+    st.session_state["classified_lyrics"] = lyrics
+
+# Editable Section UI
+if "classified_chords" in st.session_state:
+    st.subheader("🪕 Chord Sections")
+    for sec, lines in st.session_state["classified_chords"].items():
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            raw = "\n".join(lines)
+            edited = st.text_area(f"{sec} Chords", value=raw, height=100)
+            st.session_state["classified_chords"][sec] = edited.splitlines()
+        with col2:
+            note = st.text_input(f"Note for {sec}", value=st.session_state["section_notes"].get(sec, ""))
+            st.session_state["section_notes"][sec] = note
+
+if "classified_lyrics" in st.session_state:
+    st.subheader("🎤 Lyrics")
+    raw = "\n".join(st.session_state["classified_lyrics"])
+    edited = st.text_area("Lyrics", value=raw, height=200)
+    st.session_state["classified_lyrics"] = edited.splitlines()
+
+# Undo/Redo
+if st.button("Undo"):
+    if st.session_state["undo_stack"]:
+        st.session_state["redo_stack"].append(st.session_state["classified_chords"])
+        st.session_state["classified_chords"] = st.session_state["undo_stack"].pop()
+if st.button("Redo"):
+    if st.session_state["redo_stack"]:
+        st.session_state["undo_stack"].append(st.session_state["classified_chords"])
+        st.session_state["classified_chords"] = st.session_state["redo_stack"].pop()
+
+# Save Song
+if st.button("📦 Save Song from Sections"):
+    final = []
+    for sec, lines in st.session_state["classified_chords"].items():
+        final.append(f"## {sec}")
+        final.extend(lines)
+        if st.session_state["section_notes"].get(sec):
+            final.append(f"[Note] {st.session_state['section_notes'][sec]}")
+    final.append("## Lyrics")
+    final.extend(st.session_state["classified_lyrics"])
+    song_key = f"song_{datetime.now().strftime('%H%M%S')}"
+    st.session_state["songs"][song_key] = "\n".join(final)
+    st.session_state["playlist"].append(song_key)
+    st.session_state["selected_song"] = song_key
+
+# Export Tools
 if st.session_state.get("selected_song"):
     txt = st.session_state["songs"][st.session_state["selected_song"]]
     st.download_button("📄 Download TXT", txt, file_name="song.txt")
@@ -123,3 +151,14 @@ if st.session_state.get("selected_song"):
     pdf.output(pdf_path)
     with open(pdf_path, "rb") as f:
         st.download_button("🖨️ Download PDF", f.read(), file_name="song.pdf")
+
+# Web Search Stub
+st.sidebar.subheader("🔍 Import From Web (Stub)")
+st.sidebar.text_input("Search for song on Ultimate Guitar")
+
+# Fullscreen Theme Styling
+if fullscreen or dark:
+    st.markdown(
+        f"<style>body {{ background: black; color: white; font-size: {font_scale}%; }}</style>",
+        unsafe_allow_html=True,
+    )
