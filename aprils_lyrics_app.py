@@ -2,242 +2,124 @@
 
 import streamlit as st
 import numpy as np
-import os
-import json
-import time
-from datetime import datetime
 import soundfile as sf
 from fpdf import FPDF
-import fitz  # PyMuPDF
-
-CHORDS = ["C", "D", "E", "F", "G", "A", "B"]
-CHORD_ALTER = ["#", "b", "m", "7", "maj", "min", "sus", "dim", "aug"]
-NOTE_ORDER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+import fitz
+import json
+import os
+from datetime import datetime
+import time
 
 st.set_page_config(layout="wide")
 
 SETTINGS_FILE = "user_settings.json"
 SESSION_FILE = "session_data.json"
 
-def load_session():
-    if os.path.exists(SESSION_FILE):
-        with open(SESSION_FILE, 'r') as f:
-            st.session_state.update(json.load(f))
-
-def save_session():
-    data = {k: v for k, v in st.session_state.items() if isinstance(v, (dict, list, str, int, float))}
-    with open(SESSION_FILE, 'w') as f:
-        json.dump(data, f)
-
-load_session()
-
+# --- Initialization ---
 if "songs" not in st.session_state:
-    st.session_state["songs"] = {}
+    st.session_state.songs = {}
 if "playlist" not in st.session_state:
-    st.session_state["playlist"] = []
+    st.session_state.playlist = []
+if "playlists" not in st.session_state:
+    st.session_state.playlists = {}
 if "selected_song" not in st.session_state:
-    st.session_state["selected_song"] = None
+    st.session_state.selected_song = None
 if "section_order" not in st.session_state:
-    st.session_state["section_order"] = {}
+    st.session_state.section_order = {}
 if "section_rename" not in st.session_state:
-    st.session_state["section_rename"] = {}
+    st.session_state.section_rename = {}
 if "section_notes" not in st.session_state:
-    st.session_state["section_notes"] = {}
-if "tap_times" not in st.session_state:
-    st.session_state["tap_times"] = []
+    st.session_state.section_notes = {}
 
-# --- PDF Upload ---
-def extract_text_from_pdf(uploaded_file):
-    doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-    return "\n".join(page.get_text() for page in doc)
+# --- Sidebar: Playlist Manager ---
+st.sidebar.title("🎵 Playlist Manager")
+playlist_name = st.sidebar.text_input("New Playlist Name")
+if st.sidebar.button("➕ Create Playlist") and playlist_name:
+    st.session_state.playlists[playlist_name] = []
+selected_playlist = st.sidebar.selectbox("Select Playlist", list(st.session_state.playlists.keys()) or ["None"])
+if selected_playlist != "None":
+    songs_to_add = st.sidebar.multiselect("Add Songs to Playlist", list(st.session_state.songs.keys()))
+    if st.sidebar.button("📥 Update Playlist"):
+        st.session_state.playlists[selected_playlist] = songs_to_add
 
-uploaded = st.sidebar.file_uploader("Upload Song PDF", type=["pdf"])
+# --- PDF Upload + Classification ---
+st.title("Lyrics & Chords Manager")
+uploaded = st.file_uploader("Upload PDF with Lyrics/Chords", type="pdf")
 if uploaded:
-    song_name = uploaded.name.replace(".pdf", "")
-    raw = extract_text_from_pdf(uploaded)
-    st.session_state["songs"][song_name] = raw
-    st.session_state["playlist"].append(song_name)
-    st.session_state["selected_song"] = song_name
-    save_session()
-
-st.sidebar.text_input("Search for lyrics online", placeholder="Not yet implemented")
-
-if st.session_state["playlist"]:
-    st.sidebar.selectbox("Select Song", st.session_state["playlist"], key="selected_song")
-
-def transpose_chord(chord, shift):
-    base = chord
-    for alt in CHORD_ALTER:
-        if alt in chord:
-            base = chord.split(alt)[0]
-            suffix = chord[len(base):]
-            break
-    else:
-        suffix = ""
-    if base not in NOTE_ORDER:
-        return chord
-    idx = (NOTE_ORDER.index(base) + shift) % 12
-    return NOTE_ORDER[idx] + suffix
-
-transpose_shift = st.sidebar.slider("Transpose Key", -6, 6, 0)
-show_original = st.sidebar.checkbox("Show Original Chords", value=False)
-
-bpm_key = "bpm_input"
-if bpm_key not in st.session_state:
-    st.session_state[bpm_key] = 120
-col1, col2 = st.sidebar.columns(2)
-if col1.button("Tap Tempo"):
-    now = time.time()
-    st.session_state["tap_times"].append(now)
-    if len(st.session_state["tap_times"]) >= 2:
-        intervals = np.diff(st.session_state["tap_times"][-5:])
-        if len(intervals) > 0:
-            new_bpm = int(60.0 / np.mean(intervals))
-            st.session_state[bpm_key] = new_bpm
-            st.sidebar.success(f"Estimated BPM: {new_bpm}")
-if col2.button("Reset Taps"):
-    st.session_state["tap_times"] = []
-
-if st.session_state["selected_song"]:
-    song_key = st.session_state["selected_song"]
-    raw_text = st.session_state["songs"][song_key].splitlines()
-    sections = {}
+    text = ""
+    with fitz.open(stream=uploaded.read(), filetype="pdf") as doc:
+        for page in doc:
+            text += page.get_text()
+    lines = text.splitlines()
     current = "Intro"
-    for line in raw_text:
-        if any(h in line for h in ["Verse", "Chorus", "Bridge"]):
-            current = line.strip()
-            sections[current] = []
+    chords = {}
+    lyrics = []
+    for line in lines:
+        if any(k in line.lower() for k in ["verse", "chorus", "intro", "bridge", "outro", "interlude"]):
+            current = line.strip().title()
+            continue
+        if all(token.strip().isalpha() and len(token.strip()) <= 4 for token in line.split()):
+            chords.setdefault(current, []).append(line)
         else:
-            sections.setdefault(current, []).append(line)
+            lyrics.append(line)
 
-    names = list(sections.keys())
-    order_key, rename_key, note_key = f"order_{song_key}", f"rename_{song_key}", f"notes_{song_key}"
-    if order_key not in st.session_state["section_order"]:
-        st.session_state["section_order"][order_key] = names
-    if rename_key not in st.session_state["section_rename"]:
-        st.session_state["section_rename"][rename_key] = {n: n for n in names}
-    if note_key not in st.session_state["section_notes"]:
-        st.session_state["section_notes"][note_key] = {n: "" for n in names}
+    st.session_state["classified_chords"] = chords
+    st.session_state["classified_lyrics"] = lyrics
 
-    st.subheader("Arrange and Edit Sections")
-    order = st.multiselect("Section Order", names, default=st.session_state["section_order"][order_key], key=order_key)
-    renames = st.session_state["section_rename"][rename_key]
-    notes = st.session_state["section_notes"][note_key]
+# --- Editable Chord & Lyrics Sections ---
+if "classified_chords" in st.session_state:
+    st.subheader("🎼 Edit Chord Sections")
+    for sec, lines in st.session_state["classified_chords"].items():
+        raw = "\n".join(lines)
+        edited = st.text_area(f"{sec} Chords", value=raw, height=100)
+        st.session_state["classified_chords"][sec] = edited.splitlines()
 
-    for sec in order:
-        st.text_input(f"Rename '{sec}'", value=renames[sec], key=f"r_{sec}")
-        st.text_area(f"Notes for '{sec}'", value=notes[sec], key=f"n_{sec}")
-        renames[sec] = st.session_state[f"r_{sec}"]
-        notes[sec] = st.session_state[f"n_{sec}"]
+if "classified_lyrics" in st.session_state:
+    st.subheader("📝 Edit Lyrics")
+    raw = "\n".join(st.session_state["classified_lyrics"])
+    edited = st.text_area("Lyrics", value=raw, height=200)
+    st.session_state["classified_lyrics"] = edited.splitlines()
 
-    st.subheader("Song Preview")
-    for sec in order:
-        st.markdown(f"### {renames[sec]}")
-        if notes[sec]:
-            st.markdown(f"*{notes[sec]}*")
-        for line in sections[sec]:
-            if "[" in line and "]" in line:
-                parts = line.split("[")
-                new_line = parts[0]
-                for chunk in parts[1:]:
-                    chord, *rest = chunk.split("]", 1)
-                    chord_disp = chord if show_original else transpose_chord(chord, transpose_shift)
-                    new_line += f"<b style='color:red'>[{chord_disp}]</b>{rest[0] if rest else ''}"
-                st.markdown(f"<div style='font-family:monospace;font-size:18px'>{new_line}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<pre>{line}</pre>")
+if st.button("📦 Build Song from Sections"):
+    final = []
+    for sec, lines in st.session_state["classified_chords"].items():
+        final.append(f"## {sec}")
+        final.extend(lines)
+    final.append("## Lyrics")
+    final.extend(st.session_state["classified_lyrics"])
+    song_key = f"song_{datetime.now().strftime('%H%M%S')}"
+    st.session_state["songs"][song_key] = "\n".join(final)
+    st.session_state["playlist"].append(song_key)
+    st.session_state["selected_song"] = song_key
 
-    save_session()
+# --- Playback Tools ---
+st.sidebar.subheader("Tempo & Scroll")
+if "tap_times" not in st.session_state:
+    st.session_state.tap_times = []
+if st.sidebar.button("🖱️ Tap Tempo"):
+    st.session_state.tap_times.append(time.time())
+    if len(st.session_state.tap_times) >= 2:
+        intervals = np.diff(st.session_state.tap_times[-5:])
+        bpm = 60 / np.mean(intervals)
+        st.session_state["bpm"] = int(bpm)
+if st.sidebar.button("🔄 Reset Tap"):
+    st.session_state.tap_times = []
 
-    # --- Export Buttons ---
-    export_txt = st.sidebar.button("Export as .txt")
-    export_pdf = st.sidebar.button("Export as PDF")
+bpm = st.sidebar.number_input("BPM", min_value=40, max_value=240, value=st.session_state.get("bpm", 100))
+scroll = st.sidebar.checkbox("Auto-scroll with BPM")
+if scroll:
+    st.markdown(f"<meta http-equiv='refresh' content='{60/bpm}'>", unsafe_allow_html=True)
 
-    if export_txt:
-        lines = []
-        for sec in order:
-            lines.append(renames[sec])
-            if notes[sec]:
-                lines.append(f"[{notes[sec]}]")
-            lines.extend(sections[sec])
-            lines.append("")
-        file_content = "\n".join(lines)
-        st.download_button("Download .txt", data=file_content, file_name=f"{song_key}.txt")
-
-    if export_pdf:
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        for sec in order:
-            pdf.set_font("Arial", "B", 14)
-            pdf.cell(200, 10, txt=renames[sec], ln=True)
-            if notes[sec]:
-                pdf.set_font("Arial", "I", 12)
-                pdf.multi_cell(0, 10, txt=f"[{notes[sec]}]")
-            pdf.set_font("Arial", size=12)
-            for line in sections[sec]:
-                pdf.multi_cell(0, 10, txt=line)
-            pdf.ln()
-        output_path = f"/tmp/{song_key}.pdf"
-        pdf.output(output_path)
-        with open(output_path, "rb") as f:
-            st.download_button("Download PDF", data=f, file_name=f"{song_key}.pdf")
-
-    # --- Auto Scroll ---
-    auto_scroll = st.sidebar.checkbox("Enable Auto-Scroll")
-    scroll_mode = st.sidebar.radio("Scroll Mode", ["Manual", "Sync with BPM"])
-    scroll_speed = st.sidebar.slider("Scroll Speed", 10, 100, 40) if scroll_mode == "Manual" else None
-
-    if auto_scroll:
-        container = st.empty()
-        bpm = st.session_state.get("bpm_input", 60)
-        beat_interval = 60.0 / bpm if bpm > 0 else 1.0
-        for _ in range(300):
-            container.markdown("<script>window.scrollBy(0, 3);</script>", unsafe_allow_html=True)
-            time.sleep(1.0 / scroll_speed if scroll_mode == "Manual" else beat_interval)
-
-    # --- Rehearsal Mode, Fullscreen & Font Scaling ---
-    font_scale = st.sidebar.slider("Font Scale %", 50, 200, 100)
-    st.markdown(f"""
-    <style>
-    html, body, .block-container, .stMarkdown, .stText, .stCode {{
-        font-size: {font_scale * 0.14}px;
-    }}
-    </style>
-    """, unsafe_allow_html=True)
-
-    rehearsal = st.sidebar.checkbox("Enable Rehearsal Mode")
-    if rehearsal:
-        countdown = st.sidebar.number_input("Countdown (sec)", 0, 60, 5)
-        st.sidebar.write("Starting in:")
-        counter = st.empty()
-        for i in range(countdown, 0, -1):
-            counter.write(f"{i}...")
-            time.sleep(1)
-        counter.write("Go!")
-        bpm = st.session_state.get("bpm_input", 60)
-        beat_interval = 60.0 / bpm if bpm > 0 else 1.0
-        container = st.empty()
-        for _ in range(300):
-            container.markdown("<script>window.scrollBy(0, 3);</script>", unsafe_allow_html=True)
-            time.sleep(beat_interval)
-
-    if st.sidebar.checkbox("Fullscreen Lyrics View"):
-        st.markdown("""
-        <style>
-        [data-testid="stSidebar"], [data-testid="stHeader"] {
-            display: none;
-        }
-        .block-container {
-            padding-top: 1rem;
-        }
-        html, body {
-            background-color: #111;
-            color: white;
-        }
-        .stText, .stMarkdown, .stCode {
-            color: white;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        st.title(renames[order[0]] if order else "Lyrics")
+# --- Export ---
+if st.session_state.get("selected_song"):
+    txt = st.session_state["songs"][st.session_state["selected_song"]]
+    st.download_button("📄 Download TXT", txt, file_name="song.txt")
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for line in txt.splitlines():
+        pdf.cell(200, 10, txt=line, ln=True)
+    pdf_path = "/tmp/song.pdf"
+    pdf.output(pdf_path)
+    with open(pdf_path, "rb") as f:
+        st.download_button("🖨️ Download PDF", f.read(), file_name="song.pdf")
