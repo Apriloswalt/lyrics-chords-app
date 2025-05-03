@@ -1,7 +1,6 @@
-st.set_page_config(layout="wide")
-# lyrics_chords_app/main.py
-
 import streamlit as st
+st.set_page_config(layout="wide")
+
 import numpy as np
 import soundfile as sf
 from fpdf import FPDF
@@ -9,7 +8,6 @@ import fitz
 import os
 from datetime import datetime
 import time
-
 
 # Initialize session state
 defaults = {
@@ -150,7 +148,7 @@ if st.session_state.get("selected_song"):
 st.sidebar.subheader("🔍 Web Import (Stub)")
 st.sidebar.text_input("Search for song")
 
-# Fullscreen Theme
+# Theme
 if fullscreen or dark:
     st.markdown(
         f"<style>body {{ background: black; color: white; font-size: {font_scale}%; }}</style>",
