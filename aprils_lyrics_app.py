@@ -1,14 +1,31 @@
 # lyrics_chords_app/main.py
 
-... [previous code unchanged above] ...
-
+import streamlit as st
+import numpy as np
+import os
+import json
+import time
+from datetime import datetime
+import soundfile as sf
 from fpdf import FPDF
 
 CHORDS = ["C", "D", "E", "F", "G", "A", "B"]
 CHORD_ALTER = ["#", "b", "m", "7", "maj", "min", "sus", "dim", "aug"]
-
 NOTE_ORDER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
+st.set_page_config(layout="wide")
+
+# Dummy session init (replace with real load logic as needed)
+if "selected_song" not in st.session_state:
+    st.session_state["selected_song"] = "Demo"
+    st.session_state["songs"] = {
+        "Demo": "Verse 1\n[C]Hello [G]world\n[F]This is a [C]song\nChorus\n[C]Sing it [G]loud\n[F]Sing it [C]proud"
+    }
+    st.session_state["section_order"] = {"order_Demo": ["Verse 1", "Chorus"]}
+    st.session_state["section_rename"] = {"rename_Demo": {"Verse 1": "Verse", "Chorus": "Chorus"}}
+    st.session_state["section_notes"] = {"notes_Demo": {"Verse 1": "Start soft.", "Chorus": "Sing strong."}}
+
+# --- Transposition ---
 def transpose_chord(chord, shift):
     base = chord
     for alt in CHORD_ALTER:
@@ -26,7 +43,7 @@ def transpose_chord(chord, shift):
 transpose_shift = st.sidebar.slider("Transpose Key", -6, 6, 0)
 show_original = st.sidebar.checkbox("Show Original Chords", value=False)
 
-# --- On-Screen Transposed Preview with Inline Chords ---
+# --- Display & Print Preview ---
 if st.session_state.get("selected_song"):
     st.subheader("Song Preview")
     song_key = st.session_state["selected_song"]
@@ -69,7 +86,6 @@ if st.session_state.get("selected_song"):
                 color = "#f5f5f5" if line_type == "lyric" else "#eef"
                 st.markdown(f"<div style='{style};background:{color};padding:2px'>{' '.join(transposed)}</div>", unsafe_allow_html=True)
 
-# --- Print Layout Preview ---
     st.subheader("Print Layout Preview")
     for sec in order:
         st.markdown(f"### {renames.get(sec, sec)}")
@@ -89,6 +105,3 @@ if st.session_state.get("selected_song"):
                 words = line.split()
                 transposed = [w if show_original else transpose_chord(w, transpose_shift) for w in words]
                 st.code(" ".join(transposed))
-
-# --- PDF EXPORT with font + transposition ---
-...
